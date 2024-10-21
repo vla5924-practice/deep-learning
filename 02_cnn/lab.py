@@ -22,9 +22,10 @@ from datetime import datetime
 import os
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Subset, DataLoader
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+import torchinfo
 import torchvision
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -60,9 +61,7 @@ transform = transforms.Compose([
 torch.manual_seed(RANDOM_SEED)
 print("Using random seed", RANDOM_SEED)
 train_dataset = datasets.CIFAR10(root="/work/cifar", train=True, download=True, transform=transform)
-train_dataset = Subset(train_dataset, torch.randperm(len(train_dataset)))
 test_dataset = datasets.CIFAR10(root="/work/cifar", train=False, download=True, transform=transform)
-test_dataset = Subset(test_dataset, torch.randperm(len(test_dataset)))
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
@@ -155,7 +154,7 @@ print(' '.join("%5s" % classes[labels[j]] for j in range(8)))
 # %% [markdown]
 # ### Реализация с помощью PyTorch
 # 
-# Класс `ConvBlock` применяет пару слоев `Conv` + `Conv dw`, описанные выше. Этот класс используется в теле метода `forward` класса `MobileNet`, который реализует, собственно, одноименную архитектуру нейросети.
+# Класс `ConvBlock` применяет пару слоев `Conv dw` + `Conv`, описанные выше. Этот класс используется в теле метода `forward` класса `MobileNet`, который реализует, собственно, одноименную архитектуру нейросети.
 
 # %%
 class ConvBlock(nn.Module):
@@ -199,7 +198,7 @@ class MobileNet(nn.Module):
 
     def forward(self, x: torch.Tensor):
         x = self.layers(x)
-        x = x.view(x.size(0), -1) # last-dimension-wise flatten
+        x = x.view(x.size(0), -1) # front-dimension-wise flatten
         x = self.fc(x)
         return x
 
@@ -226,6 +225,14 @@ class MobileNet(nn.Module):
         return correct, total, loss
 
 # %% [markdown]
+# Действительная схема слоев нейронной сети представлена ниже.
+
+# %%
+model = MobileNet(num_classes=len(classes), cache_weights="/work/lab2_weights.pth")
+images, _ = next(iter(train_loader))
+print(torchinfo.summary(model, input_size=(BATCH_SIZE, *images[0].shape)))
+
+# %% [markdown]
 # ## Обучение модели
 # 
 # В качестве функции потерь будет использована кросс-энтропия.
@@ -236,10 +243,10 @@ class MobileNet(nn.Module):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
-model = MobileNet(num_classes=len(classes), cache_weights="/work/lab2_weights.pth").to(device)
+model = model.to(device)
 compute_loss = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=SCHEDULING_FACTOR, patience=SCHEDULING_PATIENCE, min_lr=LEARNING_RATE_MIN)
+scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=SCHEDULING_FACTOR, patience=SCHEDULING_PATIENCE, min_lr=LEARNING_RATE_MIN)
 
 # %% [markdown]
 # ### Реализация обучения
